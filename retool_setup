@@ -1,0 +1,851 @@
+# VFX Tracker — Retool App Build Guide
+
+## Overview
+
+This guide builds a 4-screen Retool app:
+1. **Projects** — list and create projects
+2. **Episodes** — list episodes for a selected project (series only)
+3. **Shots** — shot list with scene context, inline editing
+4. **Tasks** — task list for a selected shot, inline editing
+
+---
+
+## Prerequisites
+
+- Retool account (retool.com — free tier works)
+- PostgreSQL resource connected to your Supabase database
+  - In Retool: **Resources → Create new → PostgreSQL**
+  - Connection string from Supabase: **Settings → Database → URI**
+  - Name the resource: `vfx_db`
+
+---
+
+## STEP 1 — Create the App
+
+1. Retool dashboard → **Create new → App**
+2. Name it: `VFX Tracker`
+3. In the left panel, set the layout to **Sidebar navigation**
+4. You'll get a left nav and a main content area
+
+---
+
+## STEP 2 — Global State Variables
+
+Before building screens, create these app-level state variables.
+Go to **State** (left panel) → **+ Add state**:
+
+| Variable name       | Type   | Default value |
+|---------------------|--------|---------------|
+| `selected_project`  | object | `{}`          |
+| `selected_episode`  | object | `{}`          |
+| `selected_shot`     | object | `{}`          |
+| `project_type`      | string | `"feature"`   |
+
+---
+
+## STEP 3 — SCREEN 1: Projects
+
+### 3a — Add a nav item
+Left sidebar → **+ Add page** → Name: `Projects` → Icon: folder
+
+### 3b — Queries (left panel → Queries → + New)
+
+---
+
+**Query: `get_projects`**
+- Resource: `vfx_db`
+- Run: On page load, and when app opens
+- SQL:
+```sql
+SELECT
+  id,
+  code,
+  title,
+  project_type,
+  client_name,
+  production_company,
+  director,
+  vfx_supervisor,
+  status,
+  base_currency,
+  approved_budget,
+  shoot_start_date,
+  delivery_date,
+  created_at
+FROM projects
+WHERE deleted_at IS NULL
+ORDER BY created_at DESC;
+```
+
+---
+
+**Query: `create_project`**
+- Resource: `vfx_db`
+- Run: Only when triggered
+- SQL:
+```sql
+INSERT INTO projects (
+  code, title, project_type, client_name, production_company,
+  director, vfx_supervisor, status, base_currency, approved_budget,
+  shoot_start_date, delivery_date, notes
+) VALUES (
+  {{ txt_project_code.value }},
+  {{ txt_project_title.value }},
+  {{ sel_project_type.value }},
+  {{ txt_client_name.value }},
+  {{ txt_production_company.value }},
+  {{ txt_director.value }},
+  {{ txt_vfx_supervisor.value }},
+  'development',
+  {{ sel_base_currency.value }},
+  {{ num_approved_budget.value }},
+  {{ dp_shoot_start.value }},
+  {{ dp_delivery_date.value }},
+  {{ txt_notes.value }}
+)
+RETURNING id;
+```
+- On success: run `get_projects`, close the modal (`modal_new_project.close()`)
+
+---
+
+**Query: `update_project_status`**
+- Resource: `vfx_db`
+- Run: Only when triggered
+- SQL:
+```sql
+UPDATE projects
+SET status = {{ sel_project_status_inline.value }}
+WHERE id = {{ tbl_projects.selectedRow.data.id }};
+```
+- On success: run `get_projects`
+
+---
+
+### 3c — Components
+
+**Layout:** Full-width container with two rows:
+- Row 1: Header bar
+- Row 2: Projects table
+
+---
+
+**Header bar** (horizontal stack):
+- **Text** component: `Projects` — set to Heading style
+- **Button** component:
+  - Label: `+ New Project`
+  - On click: `modal_new_project.open()`
+
+---
+
+**Table: `tbl_projects`**
+- Data: `{{ get_projects.data }}`
+- Columns (configure in table settings, hide all others):
+
+| Column key          | Label            | Type           | Notes                          |
+|---------------------|------------------|----------------|-------------------------------|
+| `code`              | Code             | string         |                               |
+| `title`             | Title            | string         |                               |
+| `project_type`      | Type             | Tag            | feature=blue, series=purple   |
+| `client_name`       | Client           | string         |                               |
+| `status`            | Status           | Tag            | color-map below               |
+| `base_currency`     | Currency         | string         |                               |
+| `approved_budget`   | Budget           | Currency       | prefix `$`                   |
+| `shoot_start_date`  | Shoot Start      | Date           |                               |
+| `delivery_date`     | Delivery         | Date           |                               |
+
+Status color map:
+- `development` → gray
+- `bidding` → yellow
+- `awarded` → blue
+- `post` → orange
+- `delivery` → purple
+- `complete` → green
+- `cancelled` → red
+
+- **Row click action:** Set state variable `selected_project` to `{{ tbl_projects.selectedRow.data }}`, then navigate to Episodes page (series) or Shots page (feature):
+  ```
+  if (tbl_projects.selectedRow.data.project_type === 'series') {
+    utils.openPage('Episodes');
+  } else {
+    utils.openPage('Shots');
+  }
+  ```
+
+---
+
+**Modal: `modal_new_project`**
+- Trigger: New Project button
+- Width: 600px
+- Title: `New Project`
+
+Form fields inside the modal (use a **Form** container):
+
+| Component ID               | Type     | Label              | Options / Notes                                          |
+|---------------------------|----------|--------------------|----------------------------------------------------------|
+| `txt_project_code`        | Text     | Project Code       | Placeholder: `PROJ-2025-001`                            |
+| `txt_project_title`       | Text     | Title              |                                                          |
+| `sel_project_type`        | Select   | Type               | feature, series, short, commercial, documentary, other  |
+| `txt_client_name`         | Text     | Client             |                                                          |
+| `txt_production_company`  | Text     | Production Company |                                                          |
+| `txt_director`            | Text     | Director           |                                                          |
+| `txt_vfx_supervisor`      | Text     | VFX Supervisor     |                                                          |
+| `sel_base_currency`       | Select   | Currency           | USD, GBP, EUR, CAD, AUD, NZD                            |
+| `num_approved_budget`     | Number   | Approved Budget    |                                                          |
+| `dp_shoot_start`          | Date     | Shoot Start        |                                                          |
+| `dp_delivery_date`        | Date     | Delivery Date      |                                                          |
+| `txt_notes`               | Textarea | Notes              |                                                          |
+
+- **Save button:** On click → run `create_project`
+- **Cancel button:** On click → `modal_new_project.close()`
+
+---
+
+## STEP 4 — SCREEN 2: Episodes
+
+### 4a — Add nav item
+Left sidebar → **+ Add page** → Name: `Episodes` → Icon: film
+
+### 4b — Queries
+
+---
+
+**Query: `get_episodes`**
+- Run: On page load
+- SQL:
+```sql
+SELECT
+  e.id,
+  e.episode_number,
+  e.episode_code,
+  e.title,
+  e.air_date,
+  e.runtime_minutes,
+  e.shoot_start_date,
+  e.delivery_date,
+  e.approved_budget,
+  e.notes,
+  COUNT(DISTINCT sh.id) AS shot_count,
+  COUNT(DISTINCT sh.id) FILTER (WHERE sh.status = 'final_delivered') AS shots_delivered
+FROM episodes e
+LEFT JOIN shots sh ON sh.episode_id = e.id AND sh.deleted_at IS NULL
+WHERE e.project_id = {{ selected_project.id }}
+  AND e.deleted_at IS NULL
+GROUP BY e.id
+ORDER BY e.episode_number;
+```
+
+---
+
+**Query: `create_episode`**
+- Run: Only when triggered
+- SQL:
+```sql
+INSERT INTO episodes (
+  project_id, episode_number, episode_code, title,
+  shoot_start_date, delivery_date, approved_budget, notes
+) VALUES (
+  {{ selected_project.id }},
+  {{ num_episode_number.value }},
+  {{ txt_episode_code.value }},
+  {{ txt_episode_title.value }},
+  {{ dp_ep_shoot_start.value }},
+  {{ dp_ep_delivery.value }},
+  {{ num_ep_budget.value }},
+  {{ txt_ep_notes.value }}
+)
+RETURNING id;
+```
+- On success: run `get_episodes`, close modal
+
+---
+
+**Query: `update_episode`**
+- Run: Only when triggered
+- SQL:
+```sql
+UPDATE episodes SET
+  episode_code  = {{ tbl_episodes.changesetArray[0].episode_code }},
+  title         = {{ tbl_episodes.changesetArray[0].title }},
+  approved_budget = {{ tbl_episodes.changesetArray[0].approved_budget }},
+  delivery_date = {{ tbl_episodes.changesetArray[0].delivery_date }},
+  notes         = {{ tbl_episodes.changesetArray[0].notes }}
+WHERE id = {{ tbl_episodes.changesetArray[0].id }};
+```
+- On success: run `get_episodes`
+
+---
+
+### 4c — Components
+
+**Breadcrumb** (Text component at top):
+```
+{{ selected_project.code }} — {{ selected_project.title }} / Episodes
+```
+
+**Header bar:**
+- Text: `Episodes`
+- Button: `+ New Episode` → opens `modal_new_episode`
+- Button: `← Back to Projects` → `utils.openPage('Projects')`
+
+---
+
+**Table: `tbl_episodes`**
+- Data: `{{ get_episodes.data }}`
+- Enable **inline editing** for: `episode_code`, `title`, `approved_budget`, `delivery_date`, `notes`
+- Show **Save changes** button when `tbl_episodes.changesetArray.length > 0` → runs `update_episode`
+
+Columns:
+
+| Column key        | Label        | Type     | Editable |
+|-------------------|--------------|----------|----------|
+| `episode_number`  | #            | number   | No       |
+| `episode_code`    | Code         | string   | Yes      |
+| `title`           | Title        | string   | Yes      |
+| `shoot_start_date`| Shoot Start  | date     | No       |
+| `delivery_date`   | Delivery     | date     | Yes      |
+| `approved_budget` | Budget       | currency | Yes      |
+| `shot_count`      | Shots        | number   | No       |
+| `shots_delivered` | Delivered    | number   | No       |
+| `notes`           | Notes        | string   | Yes      |
+
+- **Row click:** Set `selected_episode` state to `{{ tbl_episodes.selectedRow.data }}`, navigate to Shots page
+
+---
+
+**Modal: `modal_new_episode`**
+
+| Component ID         | Type   | Label         |
+|---------------------|--------|---------------|
+| `num_episode_number` | Number | Episode #     |
+| `txt_episode_code`  | Text   | Code          | Placeholder: `S01E01`
+| `txt_episode_title` | Text   | Title         |
+| `dp_ep_shoot_start` | Date   | Shoot Start   |
+| `dp_ep_delivery`    | Date   | Delivery Date |
+| `num_ep_budget`     | Number | Budget        |
+| `txt_ep_notes`      | Text   | Notes         |
+
+---
+
+## STEP 5 — SCREEN 3: Shots
+
+This is the main working screen. It has a shot list with scene context columns, inline editing, and a tasks sub-panel that appears below when a shot row is clicked.
+
+### 5a — Add nav item
+Left sidebar → **+ Add page** → Name: `Shots` → Icon: camera
+
+### 5b — Queries
+
+---
+
+**Query: `get_shots`**
+- Run: On page load
+- SQL:
+```sql
+SELECT
+  sh.id,
+  sh.shot_code,
+  sh.status,
+  sh.complexity,
+  sh.priority,
+  sh.description,
+  sh.vfx_description,
+  sh.vfx_notes,
+  sh.internal_notes,
+  sh.tags,
+  sh.plate_duration_frames,
+  sh.frame_rate,
+  sh.resolution,
+  sh.cut_duration_frames,
+  sh.first_frame,
+  sh.last_frame,
+
+  -- Scene context
+  sc.scene_number,
+  sc.slug_line,
+  sc.int_ext,
+  sc.time_of_day,
+  sc.start_page,
+  sc.end_page,
+  sc.page_count,
+  sc.location_name,
+  sc.has_vfx        AS scene_has_vfx,
+
+  -- Task summary
+  COUNT(t.id)       AS task_count,
+  COALESCE(SUM(t.estimated_cost), 0) AS estimated_cost
+
+FROM shots sh
+LEFT JOIN scenes sc ON sc.id = sh.scene_id
+LEFT JOIN tasks t   ON t.shot_id = sh.id
+WHERE sh.project_id = {{ selected_project.id }}
+  AND sh.deleted_at IS NULL
+  AND (
+    {{ sel_episode_filter.value }} = '' OR
+    sh.episode_id = {{ sel_episode_filter.value }}::uuid
+  )
+  AND (
+    {{ sel_status_filter.value }} = '' OR
+    sh.status = {{ sel_status_filter.value }}
+  )
+GROUP BY sh.id, sc.id
+ORDER BY sc.scene_number, sh.shot_code;
+```
+
+---
+
+**Query: `create_shot`**
+- Run: Only when triggered
+- SQL:
+```sql
+INSERT INTO shots (
+  project_id, episode_id, scene_id, shot_code, status,
+  complexity, priority, description, vfx_description,
+  vfx_notes, internal_notes, frame_rate, resolution
+) VALUES (
+  {{ selected_project.id }},
+  NULLIF({{ sel_shot_episode.value }}, '')::uuid,
+  NULLIF({{ sel_shot_scene.value }}, '')::uuid,
+  {{ txt_shot_code.value }},
+  {{ sel_shot_status.value }},
+  {{ num_shot_complexity.value }},
+  {{ num_shot_priority.value }},
+  {{ txt_shot_description.value }},
+  {{ txt_shot_vfx_description.value }},
+  {{ txt_shot_vfx_notes.value }},
+  {{ txt_shot_internal_notes.value }},
+  {{ txt_shot_frame_rate.value }},
+  {{ txt_shot_resolution.value }}
+)
+RETURNING id;
+```
+- On success: run `get_shots`, close modal
+
+---
+
+**Query: `update_shot`**
+- Run: Only when triggered
+- SQL:
+```sql
+UPDATE shots SET
+  shot_code       = {{ tbl_shots.changesetArray[0].shot_code }},
+  status          = {{ tbl_shots.changesetArray[0].status }},
+  complexity      = {{ tbl_shots.changesetArray[0].complexity }},
+  priority        = {{ tbl_shots.changesetArray[0].priority }},
+  description     = {{ tbl_shots.changesetArray[0].description }},
+  vfx_description = {{ tbl_shots.changesetArray[0].vfx_description }},
+  vfx_notes       = {{ tbl_shots.changesetArray[0].vfx_notes }},
+  internal_notes  = {{ tbl_shots.changesetArray[0].internal_notes }},
+  resolution      = {{ tbl_shots.changesetArray[0].resolution }},
+  frame_rate      = {{ tbl_shots.changesetArray[0].frame_rate }},
+  cut_duration_frames = {{ tbl_shots.changesetArray[0].cut_duration_frames }},
+  first_frame     = {{ tbl_shots.changesetArray[0].first_frame }},
+  last_frame      = {{ tbl_shots.changesetArray[0].last_frame }}
+WHERE id = {{ tbl_shots.changesetArray[0].id }};
+```
+- On success: run `get_shots`
+
+---
+
+**Query: `soft_delete_shot`**
+- Run: Only when triggered
+- SQL:
+```sql
+UPDATE shots SET deleted_at = NOW()
+WHERE id = {{ tbl_shots.selectedRow.data.id }};
+```
+- On success: run `get_shots`
+
+---
+
+**Query: `get_scenes_for_select`**
+- Run: On page load
+- SQL:
+```sql
+SELECT
+  id AS value,
+  scene_number || ' — ' || COALESCE(slug_line, location_name, '(no slug)') AS label
+FROM scenes
+WHERE project_id = {{ selected_project.id }}
+ORDER BY sequence_order;
+```
+
+---
+
+**Query: `get_episodes_for_select`**
+- Run: On page load
+- SQL:
+```sql
+SELECT
+  id AS value,
+  episode_code || ' — ' || COALESCE(title, '') AS label
+FROM episodes
+WHERE project_id = {{ selected_project.id }}
+  AND deleted_at IS NULL
+ORDER BY episode_number;
+```
+
+---
+
+### 5c — Components
+
+**Breadcrumb:**
+```
+{{ selected_project.code }} / {{ selected_episode.episode_code || 'All Episodes' }} / Shots
+```
+
+**Header bar** (horizontal stack):
+
+Left side:
+- Text: `Shots` (heading)
+
+Right side (filter bar):
+- **Select: `sel_episode_filter`** — Label: `Episode` — Options: `{{ get_episodes_for_select.data }}` — Placeholder: `All episodes` — clearable
+- **Select: `sel_status_filter`** — Label: `Status` — Options (manual): concept, bid_pending, bid_received, awarded, in_progress, internal_review, client_review, approved, final_delivered, omit — Placeholder: `All statuses` — clearable
+- **Button:** `+ New Shot` → opens `modal_new_shot`
+- **Button (secondary):** `← Back` → `utils.openPage('Episodes')` (hidden if feature project)
+
+**Save bar** (shown only when `tbl_shots.changesetArray.length > 0`):
+- Yellow background banner
+- Text: `{{ tbl_shots.changesetArray.length }} unsaved change(s)`
+- Button: `Save` → runs `update_shot`
+- Button: `Discard` → `tbl_shots.discardChanges()`
+
+---
+
+**Table: `tbl_shots`**
+- Data: `{{ get_shots.data }}`
+- Enable inline editing
+- Row height: Tall (to show more text)
+- Enable: column resizing, row selection
+
+Columns (in order):
+
+| Column key          | Label        | Type    | Editable | Width  | Notes                                      |
+|--------------------|--------------|---------|----------|--------|--------------------------------------------|
+| `shot_code`        | Shot         | string  | Yes      | 110px  |                                            |
+| `scene_number`     | Scene        | string  | No       | 70px   | Read-only — edit via scene management      |
+| `int_ext`          | Int/Ext      | Tag     | No       | 70px   | INT=blue, EXT=green, INT/EXT=purple        |
+| `time_of_day`      | Time         | string  | No       | 70px   |                                            |
+| `location_name`    | Location     | string  | No       | 130px  |                                            |
+| `start_page`       | Pg Start     | number  | No       | 70px   | Format: decimal (1.375 = pg 1⅜)           |
+| `page_count`       | Pg Count     | number  | No       | 70px   |                                            |
+| `status`           | Status       | Select  | Yes      | 120px  | Same color map as projects                 |
+| `complexity`       | Cmplx        | number  | Yes      | 60px   | 1–5                                        |
+| `description`      | Description  | string  | Yes      | 200px  |                                            |
+| `vfx_description`  | VFX Desc     | string  | Yes      | 200px  |                                            |
+| `tags`             | Tasks        | string  | No       | 160px  | Map array to comma-separated string (below)|
+| `task_count`       | # Tasks      | number  | No       | 70px   |                                            |
+| `estimated_cost`   | Est. Cost    | currency| No       | 100px  | prefix `$`                                 |
+
+For the `tags` column, use a **custom column** with mapped value:
+```
+{{ currentRow.tags ? currentRow.tags.join(', ') : '—' }}
+```
+
+Status select options for inline editing:
+`concept, bid_pending, bid_received, awarded, in_progress, internal_review, client_review, approved, final_delivered, omit`
+
+- **Row click:** Set `selected_shot` to `{{ tbl_shots.selectedRow.data }}`, then the Tasks panel (below) auto-refreshes via `get_tasks`
+
+---
+
+**Delete button** (shown when a row is selected):
+- Label: `Delete shot`
+- Variant: Danger/outline
+- Confirm dialog: `Delete {{ tbl_shots.selectedRow.data.shot_code }}? This cannot be undone.`
+- On confirm: run `soft_delete_shot`
+
+---
+
+**Modal: `modal_new_shot`**
+
+Two-column form layout:
+
+Left column:
+
+| Component ID              | Type     | Label           | Notes                                    |
+|--------------------------|----------|-----------------|------------------------------------------|
+| `txt_shot_code`          | Text     | Shot Code       | Placeholder: `sc042_sh010`              |
+| `sel_shot_episode`       | Select   | Episode         | Options: `get_episodes_for_select.data`; hidden for feature projects |
+| `sel_shot_scene`         | Select   | Scene           | Options: `get_scenes_for_select.data`   |
+| `sel_shot_status`        | Select   | Status          | Default: `concept`                       |
+| `num_shot_complexity`    | Number   | Complexity      | Min: 1, Max: 5                           |
+| `num_shot_priority`      | Number   | Priority        | Min: 1, Max: 3, Default: 2              |
+| `txt_shot_frame_rate`    | Text     | Frame Rate      | Default: `24`                            |
+| `txt_shot_resolution`    | Text     | Resolution      | Default: `4K`                            |
+
+Right column:
+
+| Component ID                 | Type     | Label            |
+|-----------------------------|----------|------------------|
+| `txt_shot_description`      | Textarea | Description      |
+| `txt_shot_vfx_description`  | Textarea | VFX Description  |
+| `txt_shot_vfx_notes`        | Textarea | VFX Notes        |
+| `txt_shot_internal_notes`   | Textarea | Internal Notes   |
+
+- Save → run `create_shot`
+- Cancel → close modal
+
+---
+
+## STEP 6 — SCREEN 4: Tasks
+
+Tasks live as a sub-panel **on the Shots screen**, not a separate page. They appear below the shot table when a shot row is selected.
+
+### 6a — Queries (add these to the Shots page)
+
+---
+
+**Query: `get_tasks`**
+- Run: When `selected_shot` changes (add trigger: `selected_shot`)
+- SQL:
+```sql
+SELECT
+  t.id,
+  t.task_type,
+  t.description,
+  t.sequence_order,
+  t.global_default_cost,
+  t.project_default_cost,
+  t.task_cost_override,
+  t.estimated_cost,
+  t.actual_cost,
+  t.flow_task_id,
+  -- Show which tier is active
+  CASE
+    WHEN t.task_cost_override IS NOT NULL THEN 'override'
+    WHEN t.project_default_cost IS NOT NULL THEN 'project'
+    ELSE 'global'
+  END AS cost_source
+FROM tasks t
+WHERE t.shot_id = {{ selected_shot.id }}
+ORDER BY t.sequence_order, t.task_type;
+```
+
+---
+
+**Query: `get_task_defaults`**
+- Run: On page load
+- SQL:
+```sql
+SELECT
+  tcd.task_type AS value,
+  tcd.label,
+  COALESCE(ptd.default_cost, tcd.default_cost) AS default_cost,
+  tcd.default_cost AS global_cost,
+  ptd.default_cost AS project_cost,
+  tcd.label || ' ($' || COALESCE(ptd.default_cost, tcd.default_cost)::text || ')' AS display_label
+FROM task_cost_defaults tcd
+LEFT JOIN project_task_defaults ptd
+  ON ptd.task_type = tcd.task_type
+  AND ptd.project_id = {{ selected_project.id }}
+ORDER BY tcd.label;
+```
+
+---
+
+**Query: `create_task`**
+- Run: Only when triggered
+- SQL:
+```sql
+WITH defaults AS (
+  SELECT
+    COALESCE(ptd.default_cost, tcd.default_cost) AS project_default,
+    tcd.default_cost AS global_default
+  FROM task_cost_defaults tcd
+  LEFT JOIN project_task_defaults ptd
+    ON ptd.task_type = tcd.task_type
+    AND ptd.project_id = {{ selected_project.id }}
+  WHERE tcd.task_type = {{ sel_task_type.value }}
+)
+INSERT INTO tasks (
+  shot_id, task_type, description, sequence_order,
+  global_default_cost, project_default_cost, task_cost_override
+)
+SELECT
+  {{ selected_shot.id }},
+  {{ sel_task_type.value }},
+  {{ txt_task_description.value }},
+  (SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM tasks WHERE shot_id = {{ selected_shot.id }}),
+  global_default,
+  project_default,
+  NULLIF({{ num_task_cost_override.value }}, 0)
+FROM defaults
+RETURNING id;
+```
+- On success: run `get_tasks`, run `get_shots` (to refresh estimated_cost total)
+
+---
+
+**Query: `update_task`**
+- Run: Only when triggered
+- SQL:
+```sql
+UPDATE tasks SET
+  task_type         = {{ tbl_tasks.changesetArray[0].task_type }},
+  description       = {{ tbl_tasks.changesetArray[0].description }},
+  sequence_order    = {{ tbl_tasks.changesetArray[0].sequence_order }},
+  task_cost_override = NULLIF({{ tbl_tasks.changesetArray[0].task_cost_override }}, 0),
+  actual_cost       = {{ tbl_tasks.changesetArray[0].actual_cost }}
+WHERE id = {{ tbl_tasks.changesetArray[0].id }};
+```
+- On success: run `get_tasks`, run `get_shots`
+
+---
+
+**Query: `delete_task`**
+- Run: Only when triggered
+- SQL:
+```sql
+DELETE FROM tasks WHERE id = {{ tbl_tasks.selectedRow.data.id }};
+```
+- On success: run `get_tasks`, run `get_shots`
+
+---
+
+### 6b — Task Panel Components (on the Shots page, below tbl_shots)
+
+Add a **Divider**, then a **Container** component. Show the container only when a shot is selected:
+- Visibility condition: `{{ selected_shot.id !== undefined }}`
+
+Inside the container:
+
+**Task panel header** (horizontal stack):
+- Text: `Tasks for {{ selected_shot.shot_code }}` (heading, medium)
+- Text (secondary): `Est. total: ${{ get_tasks.data.reduce((s, r) => s + (r.estimated_cost || 0), 0).toFixed(2) }}`
+- Button: `+ Add Task` → opens `modal_new_task`
+- Button (icon, danger): trash icon → runs `delete_task` when a task row is selected
+
+**Task save bar** (shown when `tbl_tasks.changesetArray.length > 0`):
+- Text: `{{ tbl_tasks.changesetArray.length }} unsaved task change(s)`
+- Button: `Save` → runs `update_task`
+- Button: `Discard` → `tbl_tasks.discardChanges()`
+
+---
+
+**Table: `tbl_tasks`**
+- Data: `{{ get_tasks.data }}`
+- Enable inline editing
+- Row height: Default
+
+Columns:
+
+| Column key            | Label          | Type    | Editable | Notes                                              |
+|----------------------|----------------|---------|----------|----------------------------------------------------|
+| `sequence_order`     | #              | number  | Yes      | Drag to reorder (or edit number)                  |
+| `task_type`          | Task Type      | Select  | Yes      | Options from `task_type` enum values              |
+| `description`        | Description    | string  | Yes      |                                                    |
+| `global_default_cost`| Global Default | currency| No       | Dimmed — shows system default                     |
+| `project_default_cost`| Proj Default  | currency| No       | Dimmed — shows project override if set            |
+| `task_cost_override` | Override       | currency| Yes      | User types here to override; leave blank to use default |
+| `estimated_cost`     | Est. Cost      | currency| No       | Bold — resolved value (override > project > global)|
+| `actual_cost`        | Actual         | currency| Yes      | Filled during production                          |
+| `cost_source`        | Source         | Tag     | No       | override=orange, project=blue, global=gray        |
+
+Task type select options (for inline editing):
+`2d_comp, 3d_comp, roto, paint, tracking, matchmove, fx_simulation, lighting, rendering, modelling, rigging, animation, matte_painting, colour_grade, stereo_conversion, previs, techvis, supervision, data_io, other`
+
+---
+
+**Modal: `modal_new_task`**
+
+| Component ID               | Type     | Label              | Notes                                              |
+|---------------------------|----------|--------------------|----------------------------------------------------|
+| `sel_task_type`           | Select   | Task Type          | Options: `get_task_defaults.data` (value=task_type, label=display_label) |
+| `txt_task_description`    | Textarea | Description        |                                                    |
+| `num_task_cost_override`  | Number   | Cost Override      | Placeholder: `Leave blank to use default`         |
+
+Below the cost override input, add a **Text** component showing the resolved default:
+```
+Default for this task: ${{ get_task_defaults.data.find(d => d.value === sel_task_type.value)?.default_cost || '—' }}
+```
+
+- Save → run `create_task`
+- Cancel → close modal
+
+---
+
+## STEP 7 — Summary Stats Bar (add to Shots page, above the table)
+
+A horizontal row of **Statistic** components showing live numbers for the selected project/episode:
+
+**Stat 1 — Total Shots**
+```
+{{ get_shots.data.length }}
+```
+
+**Stat 2 — VFX Scenes**
+```
+{{ [...new Set(get_shots.data.map(r => r.scene_number).filter(Boolean))].length }}
+```
+
+**Stat 3 — Total Pages**
+```
+{{ get_shots.data.reduce((s, r) => {
+  const seen = new Set();
+  if (!seen.has(r.scene_number)) { seen.add(r.scene_number); return s + (r.page_count || 0); }
+  return s;
+}, 0).toFixed(3) }}
+```
+
+**Stat 4 — Internal Estimate**
+```
+${{ get_shots.data.reduce((s, r) => s + (r.estimated_cost || 0), 0).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0}) }}
+```
+
+**Stat 5 — Shots by Status** (use a **Bar chart** component instead):
+- Data: group `get_shots.data` by status and count
+- X axis: status, Y axis: count
+- Compact/small size
+
+---
+
+## STEP 8 — Navigation Logic
+
+In Retool's left sidebar nav, set up page-level **On load** handlers:
+
+**Episodes page on load:**
+- If `selected_project.id` is empty → redirect to Projects page
+- Run `get_episodes`
+
+**Shots page on load:**
+- If `selected_project.id` is empty → redirect to Projects page
+- Run `get_shots`, `get_scenes_for_select`, `get_episodes_for_select`, `get_task_defaults`
+
+---
+
+## STEP 9 — Polish Tips
+
+**Color-code complexity** on the shots table using a custom column renderer:
+```
+{{ ['','🟢','🔵','🟡','🟠','🔴'][currentRow.complexity] || '—' }} {{ currentRow.complexity }}
+```
+
+**Page count display** — Retool doesn't natively format eighths, so use a custom column:
+```js
+{{
+  const v = currentRow.page_count;
+  if (!v) return '—';
+  const whole = Math.floor(v);
+  const frac = Math.round((v - whole) * 8);
+  const fracs = ['','⅛','¼','⅜','½','⅝','¾','⅞'];
+  return whole + (frac ? fracs[frac] : '') + ' pp';
+}}
+```
+
+**Freeze the first two columns** (Shot, Scene) in `tbl_shots` so they stay visible when scrolling right — set `Frozen` to true on those columns in the table settings.
+
+**Keyboard shortcut tip:** In Retool tables, pressing Enter on a selected row opens inline editing. Escape discards. Tab moves between cells.
+
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `get_shots` returns no rows | Check `selected_project.id` is set — navigate from Projects first |
+| Tags column shows `[object Object]` | Confirm custom column expression uses `.join(', ')` not direct render |
+| Cost trigger not firing | Verify the `sync_shot_tags` trigger was created — check Supabase → Database → Triggers |
+| Episode filter shows for feature projects | Add visibility condition on `sel_episode_filter`: `{{ selected_project.project_type === 'series' }}` |
+| `create_task` fails | Ensure `task_cost_defaults` table has rows — the seed INSERT in the schema must have run |
