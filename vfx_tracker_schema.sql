@@ -1186,8 +1186,6 @@ SELECT
 
 FROM shots sh
 WHERE sh.deleted_at IS NULL;
-GROUP BY sh.id, sh.project_id, sh.shot_code, sh.status,
-         sh.awarded_vendor_id, aw_sh.awarded_cost_base_currency;
 
 -- ---------------------------------------------------------------------------
 -- Bid comparison view (all bids for a project's shots side-by-side)
