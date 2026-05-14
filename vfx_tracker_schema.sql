@@ -847,9 +847,6 @@ CREATE TABLE awarded_shots (
   UNIQUE (award_id, shot_id)
 );
 
-ALTER TABLE shots ADD COLUMN awarded_vendor_id UUID REFERENCES vendors(id) ON DELETE SET NULL;
-ALTER TABLE shots ADD COLUMN award_id UUID REFERENCES awards(id) ON DELETE SET NULL;
-
 
 -- =============================================================================
 -- SECTION 10: CHANGE ORDERS
