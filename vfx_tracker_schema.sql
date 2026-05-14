@@ -1153,20 +1153,19 @@ WHERE p.deleted_at IS NULL
 GROUP BY p.id;
 
 -- ---------------------------------------------------------------------------
--- Shot-level cost view
+-- Shot-level cost view (Updated for Multi-Vendor)
 CREATE VIEW v_shot_costs AS
 SELECT
   sh.id                       AS shot_id,
   sh.project_id,
   sh.shot_code,
   sh.status,
-  sh.awarded_vendor_id,
 
   -- Internal estimate
-  COALESCE(SUM(t.estimated_cost), 0)  AS estimated_cost,
+  COALESCE((SELECT SUM(t.estimated_cost) FROM tasks t WHERE t.shot_id = sh.id), 0) AS estimated_cost,
 
-  -- Awarded cost
-  aw_sh.awarded_cost_base_currency    AS awarded_cost_base,
+  -- Awarded cost (Summed across ALL vendors working on this shot)
+  COALESCE((SELECT SUM(aw_sh.awarded_cost_base_currency) FROM awarded_shots aw_sh WHERE aw_sh.shot_id = sh.id), 0) AS awarded_cost_base,
 
   -- Change orders affecting this shot
   COALESCE((
@@ -1177,7 +1176,7 @@ SELECT
   ), 0)                               AS co_delta_base,
 
   -- Current total
-  COALESCE(aw_sh.awarded_cost_base_currency, 0) +
+  COALESCE((SELECT SUM(aw_sh.awarded_cost_base_currency) FROM awarded_shots aw_sh WHERE aw_sh.shot_id = sh.id), 0) +
   COALESCE((
     SELECT SUM(cos.delta_base_currency)
     FROM change_order_shots cos
@@ -1186,9 +1185,7 @@ SELECT
   ), 0)                               AS current_cost_base
 
 FROM shots sh
-LEFT JOIN tasks t          ON t.shot_id = sh.id
-LEFT JOIN awarded_shots aw_sh ON aw_sh.shot_id = sh.id
-WHERE sh.deleted_at IS NULL
+WHERE sh.deleted_at IS NULL;
 GROUP BY sh.id, sh.project_id, sh.shot_code, sh.status,
          sh.awarded_vendor_id, aw_sh.awarded_cost_base_currency;
 
