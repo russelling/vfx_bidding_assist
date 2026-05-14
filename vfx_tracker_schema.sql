@@ -177,15 +177,17 @@ CREATE TYPE report_type AS ENUM (
 -- =============================================================================
 
 CREATE TABLE users (
-  id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  -- Make the ID match the Supabase Auth UUID
+  id              UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   email           TEXT NOT NULL UNIQUE,
   full_name       TEXT NOT NULL,
-  role            TEXT NOT NULL DEFAULT 'coordinator',  -- coordinator | supervisor | producer | admin
+  role            TEXT NOT NULL DEFAULT 'coordinator',  
   is_active       BOOLEAN NOT NULL DEFAULT TRUE,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 SELECT attach_updated_at('users');
+
 
 -- ---------------------------------------------------------------------------
 CREATE TABLE projects (
@@ -1239,6 +1241,96 @@ WHERE b.status NOT IN ('withdrawn', 'rejected');
 --   3. Write both values into tasks.project_default_cost and tasks.global_default_cost
 --   4. Leave tasks.task_cost_override NULL unless the user explicitly overrides it
 -- The generated column tasks.estimated_cost resolves: override ?? project ?? global
+
+
+-- =============================================================================
+-- SECTION 17: ROW LEVEL SECURITY (RLS) ENABLEMENT
+-- =============================================================================
+
+-- Enable RLS on core project tables
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vendors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bids ENABLE ROW LEVEL SECURITY;
+ALTER TABLE awards ENABLE ROW LEVEL SECURITY;
+
+-- Important: Enable RLS on your custom users table
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+
+-- =============================================================================
+-- SECTION 18: AUTHENTICATION TRIGGERS
+-- =============================================================================
+
+-- Create a function to handle new user signups
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.users (id, email, full_name, role)
+  VALUES (
+    new.id,
+    new.email,
+    -- Default the name to the email prefix if no name is provided during signup
+    COALESCE(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
+    'coordinator' -- Default role
+  );
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger this function every time a user is created in Supabase Auth
+CREATE OR REPLACE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+
+-- =============================================================================
+-- SECTION 19: RLS POLICIES (Simple Authentication Model)
+-- =============================================================================
+
+-- Allow users to read all other users (useful for assigning tasks, producers, etc.)
+CREATE POLICY "Allow authenticated read on users" ON users
+  FOR SELECT TO authenticated USING (true);
+
+-- Allow users to update their own profile
+CREATE POLICY "Allow user to update own profile" ON users
+  FOR UPDATE TO authenticated USING (auth.uid() = id);
+
+-- Universal Read/Write policies for authenticated users on core tables
+-- (Note: For a small team, this assumes all logged-in users are trusted)
+
+-- Projects
+CREATE POLICY "Allow authenticated read on projects" ON projects FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow authenticated insert on projects" ON projects FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Allow authenticated update on projects" ON projects FOR UPDATE TO authenticated USING (true);
+
+-- Shots
+CREATE POLICY "Allow authenticated read on shots" ON shots FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow authenticated insert on shots" ON shots FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Allow authenticated update on shots" ON shots FOR UPDATE TO authenticated USING (true);
+CREATE POLICY "Allow authenticated delete on shots" ON shots FOR DELETE TO authenticated USING (true);
+
+-- Tasks
+CREATE POLICY "Allow authenticated read on tasks" ON tasks FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow authenticated insert on tasks" ON tasks FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Allow authenticated update on tasks" ON tasks FOR UPDATE TO authenticated USING (true);
+CREATE POLICY "Allow authenticated delete on tasks" ON tasks FOR DELETE TO authenticated USING (true);
+
+-- Vendors
+CREATE POLICY "Allow authenticated read on vendors" ON vendors FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow authenticated insert on vendors" ON vendors FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Allow authenticated update on vendors" ON vendors FOR UPDATE TO authenticated USING (true);
+
+-- Bids
+CREATE POLICY "Allow authenticated read on bids" ON bids FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow authenticated insert on bids" ON bids FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Allow authenticated update on bids" ON bids FOR UPDATE TO authenticated USING (true);
+
+-- Awards
+CREATE POLICY "Allow authenticated read on awards" ON awards FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Allow authenticated insert on awards" ON awards FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "Allow authenticated update on awards" ON awards FOR UPDATE TO authenticated USING (true);
 
 
 -- =============================================================================
