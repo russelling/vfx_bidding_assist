@@ -847,15 +847,6 @@ CREATE TABLE awarded_shots (
   UNIQUE (award_id, shot_id)
 );
 
--- A shot can only be awarded to ONE vendor at a time (enforced via partial unique index)
-CREATE UNIQUE INDEX idx_one_active_award_per_shot
-  ON awarded_shots(shot_id)
-  WHERE shot_id IN (
-    SELECT shot_id FROM awarded_shots
-  );
--- Note: application logic must enforce this; the above is illustrative.
--- Better approach: use a flag on shots.awarded_vendor_id (see below)
-
 ALTER TABLE shots ADD COLUMN awarded_vendor_id UUID REFERENCES vendors(id) ON DELETE SET NULL;
 ALTER TABLE shots ADD COLUMN award_id UUID REFERENCES awards(id) ON DELETE SET NULL;
 
